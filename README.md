@@ -137,13 +137,11 @@ Simulation was performed using **AMD Vivado**.
 │   ├── decoder.sv
 │   ├── register_file.sv
 │   ├── instruction_memory.sv
-│   └── totalCPU.sv
 ├── testbenches/
 │   ├── test_alu.sv
 │   ├── test_decoder.sv
 │   ├── test_program_counter.sv
 │   ├── test_register_file.sv
-│   └── totalTestBenches.sv
 ├── assembler/
 │   ├── assembler.py
 │   ├── text.txt          # Example assembly program
