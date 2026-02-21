@@ -65,7 +65,6 @@ Instruction Memory → Program Counter → Decoder → Register File → ALU →
 | `decoder.sv`            | Decodes 4-bit opcode into ALUop, WB, ImmEnable, ImmType, Branch |
 | `register_file.sv`      | 16×8-bit register file with dual read ports and sync write |
 | `instruction_memory.sv` | ROM storing the program (loaded from assembled hex)       |
-| `totalCPU.sv`           | Top-level integration of all modules                      |
 
 ### Decoder Output Signals
 
@@ -119,7 +118,6 @@ END: beqz r0, END
 | `test_decoder.sv`         | All 16 opcodes and output signals |
 | `test_program_counter.sv` | Reset, increment, branching      |
 | `test_register_file.sv`   | Read, write, hardwired registers |
-| `totalTestBenches.sv`     | Full CPU integration test        |
 
 Simulation was performed using **AMD Vivado**.
 
