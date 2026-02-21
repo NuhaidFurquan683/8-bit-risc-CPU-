@@ -1,0 +1,10 @@
+li r2, 5
+li r3, 6
+xor r4, r3, r2
+beqz r0, NEXT
+li r14, 8
+NEXT: beqz r4, SKIP
+li r12, 8
+SKIP: beqz r2, END
+li r13, 4
+END: beqz, r0, END
