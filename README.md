@@ -5,7 +5,7 @@ A custom 8-bit RISC processor designed and verified in SystemVerilog, with a 16-
 **Highlights**
 
 - Custom 16-instruction ISA across four encodings (R / I / L / B), 16-bit instruction word
-- 16 × 8-bit register file with dual asynchronous read ports and synchronous write; `R0`/`R1` hardwired to `0`/`1`, `R14`/`R15` mapped to LED outputs
+- 16 × 8-bit register file with dual read ports and synchronous write; `R0`/`R1` hardwired to `0`/`1`, `R14`/`R15` mapped to LED outputs
 - Structural ALU: 1-bit full adder → 8-bit ripple-carry chain → add/sub top level; subtraction computed as `A + ~B + 1` to reuse the same adder hardware
 - Decoder control logic minimised by hand with Karnaugh maps before implementation ([scanned working notes](docs/design-notes/))
 - Signed relative branching (`PC = PC + Bamt`) supporting forward and backward jumps, with active-low synchronous reset
@@ -13,7 +13,7 @@ A custom 8-bit RISC processor designed and verified in SystemVerilog, with a 16-
 
 ---
 
-## Architecture
+## Datapath
 
 ```
             +--------------------+
@@ -35,9 +35,23 @@ A custom 8-bit RISC processor designed and verified in SystemVerilog, with a 16-
                                         +-----------+
 ```
 
-### ALU
+Every module below was verified with its own Vivado testbench — each section shows the module's role and the actual simulation waveform.
 
-Eight operations selected by a 3-bit `ALUop`. The adder and subtractor compute in parallel; a mux selects the result. Carry is captured for `add`, and inverted for `sub` (borrow). The zero flag drives `beqz`.
+---
+
+## Program Counter (`program_counter.sv`)
+
+Tracks and updates the current instruction address. Sequential execution increments the PC by 1 each cycle; a taken branch adds a **signed** branch amount (`PC = PC + Bamt`), allowing jumps both forwards and backwards through the program. An active-low synchronous reset (`nReset`) reinitialises the PC to address 0.
+
+The waveform shows reset behaviour, sequential incrementing, and signed branch amounts (`0a`, `f6`, `64`, `c8`) being applied when `Taken` is asserted:
+
+![Program counter waveform](docs/waveforms/program_counter.jpg)
+
+---
+
+## ALU (`alu.sv`, `adder_8bit.sv`, `fullAdder.sv`)
+
+Performs eight operations selected by a 3-bit `ALUop`. Built structurally from three parallel blocks — logic ops, an adder, and a subtractor — with a mux choosing which result to output:
 
 | ALUop | Operation   | Result        |
 |-------|-------------|---------------|
@@ -50,11 +64,20 @@ Eight operations selected by a 3-bit `ALUop`. The adder and subtractor compute i
 | 110   | SLL         | `A << B`      |
 | 111   | SRL         | `A >> B`      |
 
+The adder is a modular chain: a 1-bit full adder, eight of them daisy-chained into `adder_8bit.sv`, and a top level selecting add vs. subtract. Subtraction is computed as `A + ~B` with carry-in `1` rather than a separate subtractor circuit, reusing the full-adder hardware and reducing gate count. Carry is captured on `add`; on `sub` the final carry is inverted since it represents a borrow. A zero flag is raised when the result is `0`, which drives the `beqz` branch decision.
+
 ![ALU block diagram](docs/alu_block_diagram.png)
 
-### Decoder
+Both operands, all eight operations, and the carry/zero flags exercised in simulation (waveform split across two captures):
 
-The 4-bit opcode is translated into five control signals. Rather than a naive case statement, each signal was reduced by hand with truth tables and Karnaugh maps to minimise gate count — e.g. `ALUop[2:0]` falls straight out of the opcode's low bits, `WB = O₀ + O₁ + O₂ + O₃` (De Morgan on the single non-writeback case), and `ImmEnable = O₃`. The full derivations are in [docs/design-notes/](docs/design-notes/).
+![ALU waveform 1](docs/waveforms/alu_1.jpg)
+![ALU waveform 2](docs/waveforms/alu_2.jpg)
+
+---
+
+## Decoder (`decoder.sv`)
+
+Translates the 4-bit opcode into the five control signals that steer the datapath:
 
 | Signal      | Width | Function                                        |
 |-------------|-------|-------------------------------------------------|
@@ -63,6 +86,33 @@ The 4-bit opcode is translated into five control signals. Rather than a naive ca
 | `ImmEnable` | 1     | Selects immediate over register operand         |
 | `ImmType`   | 1     | `0` = I-type immediate, `1` = L-type immediate  |
 | `Branch`    | 1     | Marks a branch instruction                      |
+
+Rather than a naive case statement, each signal was reduced by hand with truth tables and Karnaugh maps to minimise gate count: `ALUop[2:0]` falls straight out of the opcode's low bits, `WB = O₀ + O₁ + O₂ + O₃` (De Morgan applied to the single non-writeback case, `beqz`), `ImmEnable = O₃`, and `Branch` is high only for opcode `0000`. Full derivations: [docs/design-notes/](docs/design-notes/).
+
+All 16 opcodes swept against expected control-signal vectors:
+
+![Decoder waveform](docs/waveforms/decoder.jpg)
+
+---
+
+## Register File (`register_file.sv`)
+
+Sixteen 8-bit registers with two read ports (A and B, readable simultaneously) and a synchronous write port. `R0` is hardwired to `0` and `R1` to `1` — writes to them are ignored — giving programs free constants. `R14` and `R15` are mapped to LED outputs for on-board visibility of program results.
+
+Dual-port reads and synchronous writes:
+
+![Register file waveform 1](docs/waveforms/register_file_1.jpg)
+![Register file waveform 2](docs/waveforms/register_file_2.jpg)
+
+Values written to `R14`/`R15` appearing on the LED output ports:
+
+![Register file LED outputs](docs/waveforms/register_file_leds.jpg)
+
+---
+
+## Instruction Memory (`instruction_memory.sv`)
+
+A 256-entry × 16-bit ROM holding the assembled program, read combinationally at the current PC address.
 
 ---
 
@@ -116,9 +166,7 @@ END: beqz r0, END        ; halt via self-branch
 
 ---
 
-## Verification
-
-Every module has a dedicated testbench under `testbenches/`, simulated in AMD Vivado. Waveform captures below are from the actual simulation runs.
+## Verification Summary
 
 | Testbench                 | Coverage                                                        |
 |---------------------------|-----------------------------------------------------------------|
@@ -127,32 +175,7 @@ Every module has a dedicated testbench under `testbenches/`, simulated in AMD Vi
 | `test_decoder.sv`         | All 16 opcodes against expected control-signal vectors          |
 | `test_register_file.sv`   | Dual-port reads, synchronous writes, hardwired `R0`/`R1`, LED ports |
 
-<details>
-<summary><b>Program counter</b> — reset, increment, and signed branching (click to expand)</summary>
-
-![Program counter waveform](docs/waveforms/program_counter.jpg)
-</details>
-
-<details>
-<summary><b>ALU</b> — all operations with carry/zero flags</summary>
-
-![ALU waveform 1](docs/waveforms/alu_1.jpg)
-![ALU waveform 2](docs/waveforms/alu_2.jpg)
-</details>
-
-<details>
-<summary><b>Decoder</b> — control signals across all 16 opcodes</summary>
-
-![Decoder waveform](docs/waveforms/decoder.jpg)
-</details>
-
-<details>
-<summary><b>Register file</b> — dual-port reads, writes, and LED-mapped registers</summary>
-
-![Register file waveform 1](docs/waveforms/register_file_1.jpg)
-![Register file waveform 2](docs/waveforms/register_file_2.jpg)
-![Register file LED outputs](docs/waveforms/register_file_leds.jpg)
-</details>
+All simulations run in **AMD Vivado**; the waveforms shown per module above are captures from these testbench runs.
 
 ---
 
